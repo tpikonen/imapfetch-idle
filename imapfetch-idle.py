@@ -68,6 +68,12 @@ class IMAPSocket():
         self.security = security
         self.port = port
 
+    def matchCertificate(self, peercert, host):
+        if host != self.server:
+            return "Hosts do not match"
+        ssl.match_hostname(peercert, self.server)
+        return None
+
     def verifyCertificate(self, peercert, host):
         peerX509 = crypto.load_certificate(crypto.FILETYPE_ASN1,
                                            peercert)
@@ -87,13 +93,13 @@ class IMAPSocket():
                 self.M = imaplib2.IMAP4(self.server, self.port,
                                         timeout=20)
                 self.M.starttls(
-                    ca_certs=None, cert_verify_cb=self.verifyCertificate,
-                    ssl_version="tls1")
+                    ca_certs=self.certfile,
+                    cert_verify_cb=self.matchCertificate, ssl_version="tls1")
             elif self.security == EXPLICIT_SSL:
                 self.M = imaplib2.IMAP4_SSL(
-                    self.server, self.port, ca_certs=None,
-                    cert_verify_cb=self.verifyCertificate, ssl_version="tls1",
-                    timeout=20)
+                    self.server, self.port, ca_certs=self.certfile,
+                    cert_verify_cb=self.matchCertificate, ssl_version="tls1",
+                    timeout=20, debug=4)
             else:
                 raise Exception("Unsupported security method. Refusing to go"
                                 " unencrypted.")
