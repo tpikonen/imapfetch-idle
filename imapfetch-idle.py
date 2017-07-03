@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.4
+#!/usr/bin/env python3
 # vim:ts=4:sts=4:sw=4:et:tw=79
 
 # Copyright (c) 2014, Clemens Lang
