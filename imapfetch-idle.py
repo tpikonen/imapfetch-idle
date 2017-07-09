@@ -43,6 +43,8 @@ import time
 
 import imaplib2
 
+import mbsyncrc
+
 TIMEOUT_MINUTES = 3
 
 STARTTLS = "starttls"
@@ -99,7 +101,7 @@ class IMAPSocket():
                 self.M = imaplib2.IMAP4_SSL(
                     self.server, self.port, ca_certs=self.certfile,
                     cert_verify_cb=self.matchCertificate, ssl_version="tls1",
-                    timeout=20, debug=4)
+                    timeout=20, debug=0)
             else:
                 raise Exception("Unsupported security method. Refusing to go"
                                 " unencrypted.")
@@ -177,22 +179,29 @@ class IMAPSocket():
                 self.globalQ.put((self.name, self.directory))
 
 if __name__ == '__main__':
-    import config
-
-    mbsync = '/usr/bin/mbsync'
+    # FIXME: enabling just some accounts does not work yet
+    enabled = ["tpikonen-gmail-imap"]
+    conf = mbsyncrc.parse()
 
     q = Queue()
 
     sockets = []
 
+    mbsyncrc.call_mbsync(conf)
+
     try:
-        for account in config.accounts:
-            try:
-                sockets.append(IMAPSocket(q, *account[0], **account[1]))
-            except Exception as e:
-                print("Error connecting to account {!s}/{!s}: {}"
-                      .format(account[0][1], account[0][-1], e),
-                      file=sys.stderr)
+        for imap in conf.keys():
+            d = conf[imap].copy()
+            d.pop("folders")
+            for f in conf[imap]["folders"]:
+                d["directory"] = f
+                try:
+                    #print(d)
+                    sockets.append(IMAPSocket(q, imap, **d))
+                except Exception as e:
+                    print("Error connecting to account {!s}/{!s}: {}"
+                          .format(d["server"], d["directory"], e),
+                          file=sys.stderr)
 
         if len(sockets) == 0:
             exit(0)
@@ -203,6 +212,7 @@ if __name__ == '__main__':
 
         items = set()
         while True:
+
             items.clear()
             try:
                 # wait for an event, but at most TIMEOUT_MINUTES
@@ -228,7 +238,7 @@ if __name__ == '__main__':
             except Empty as qee:
                 pass
 
-            args = [mbsync]
+            args = []
             boxes = []
             for item in items:
                 channel, folder = item
@@ -236,16 +246,13 @@ if __name__ == '__main__':
                 boxes.append("{}/{}".format(channel, folder))
             if len(items) == 0:
                 args.append("-a")
-
-            print("Triggering sync: {}".format(repr(args)))
-            retval = subprocess.call(args)
-            print("Sync finished with exit code {}".format(retval))
-            if len(boxes) > 0:
-                subprocess.call([
-                    '/usr/bin/notify-send', '-i', 'indicator-messages-new',
-                    'New Mail', 'in mailbox{} {}'.format(
-                        'es' if len(boxes) > 1 else '',
-                        ', '.join(boxes))])
+            mbsyncrc.call_mbsync(conf, args)
+#            if len(boxes) > 0:
+#                subprocess.call([
+#                    '/usr/bin/notify-send', '-i', 'indicator-messages-new',
+#                    'New Mail', 'in mailbox{} {}'.format(
+#                        'es' if len(boxes) > 1 else '',
+#                        ', '.join(boxes))])
     except KeyboardInterrupt as ki:
         print("^C received, shutting down...", file=sys.stderr)
     finally:
