@@ -40,6 +40,7 @@ import ssl
 import subprocess
 import sys
 import time
+import logging
 
 import imaplib2
 
@@ -138,13 +139,12 @@ class IMAPSocket():
                 try:
                     self.connect()
                 except Exception as e:
-                    print("Error connecting to {}:{}: {!s}"
-                          .format(self.name, self.directory, e),
-                          file=sys.stderr)
+                    logging.error("Error connecting to {}:{}: {!s}"
+                        .format(self.name, self.directory, e))
                     return
 
-            print("Idling on {}, mailbox {}...".format(self.name,
-                                                       self.directory))
+            logging.info("Idling on {}, mailbox {}...".format(self.name,
+                self.directory))
 
             def callback(args):
                 self.localEv.set()
@@ -156,8 +156,8 @@ class IMAPSocket():
                 if self.deathpill:
                     return
 
-                print("Connection to {}:{} terminated unexpectedly: "
-                      "{!s}".format(self.name, self.directory, e))
+                logging.error("Connection to {}:{} terminated unexpectedly: "
+                    "{!s}".format(self.name, self.directory, e))
                 self.connected = False
 
             # Wait for the IMAP command to complete, or the stop() method being
@@ -174,11 +174,13 @@ class IMAPSocket():
                 numNewMails = sum(map(lambda x: 1 if (x and x != '0') else 0,
                                   res[1]))
             if numNewMails > 0:
-                print("Found new mail ({:d} mails) on {}, mailbox"
-                      " {}".format(numNewMails, self.name, self.directory))
+                logging.info("Found new mail ({:d} mails) on {}, mailbox"
+                    " {}".format(numNewMails, self.name, self.directory))
                 self.globalQ.put((self.name, self.directory))
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO,
+        format="%(levelname)s:%(message)s")
     # FIXME: enabling just some accounts does not work yet
     enabled = ["tpikonen-gmail-imap"]
     conf = mbsyncrc.parse()
@@ -196,12 +198,10 @@ if __name__ == '__main__':
             for f in conf[imap]["folders"]:
                 d["directory"] = f
                 try:
-                    #print(d)
                     sockets.append(IMAPSocket(q, imap, **d))
                 except Exception as e:
-                    print("Error connecting to account {!s}/{!s}: {}"
-                          .format(d["server"], d["directory"], e),
-                          file=sys.stderr)
+                    logging.error("Error connecting to account {!s}/{!s}: {}"
+                        .format(d["server"], d["directory"], e))
 
         if len(sockets) == 0:
             exit(0)
@@ -221,8 +221,8 @@ if __name__ == '__main__':
                 q.task_done()
 
                 channel, folder = item
-                print("Dealing with mail on {}, mailbox {}. Waiting a little"
-                      " for more...".format(channel, folder))
+                logging.info("Dealing with mail on {}, mailbox {}."
+                    " Waiting a little for more...".format(channel, folder))
 
                 # Wait for three seconds to see if we can consolidate
                 try:
@@ -231,11 +231,12 @@ if __name__ == '__main__':
                         items.add(item)
                         q.task_done()
                         channel, folder = item
-                        print("Additional activity on {}, mailbox"
-                              " {}.".format(channel, folder))
+                        logging.info("Additional activity on {}, mailbox"
+                            " {}.".format(channel, folder))
                 except Empty as qee:
                     pass
             except Empty as qee:
+                logging.info("Timeout reached.")
                 pass
 
             args = []
@@ -254,7 +255,7 @@ if __name__ == '__main__':
 #                        'es' if len(boxes) > 1 else '',
 #                        ', '.join(boxes))])
     except KeyboardInterrupt as ki:
-        print("^C received, shutting down...", file=sys.stderr)
+        logging.info("^C received, shutting down...")
     finally:
         for sock in sockets:
             sock.stop()

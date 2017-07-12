@@ -1,4 +1,4 @@
-import sys, os.path, tempfile, subprocess
+import sys, os.path, tempfile, subprocess, logging
 import threading, shlex
 
 sectionkws = ["maildirstore", "imapaccount", "imapstore", "channel", "group"]
@@ -112,9 +112,9 @@ def call_mbsync(conf, params=["-a"]):
     mbsync = '/usr/bin/mbsync'
     args = [mbsync, "-c", "%s" % fifoname]
     args.extend(params)
-    print("Triggering sync: {}".format(repr(args)))
+    logging.info("Triggering sync: {}".format(repr(args)))
     retval = subprocess.call(args)
-    print("Sync finished with exit code {}".format(retval))
+    logging.info("Sync finished with exit code {}".format(retval))
 
     confthread.join()
     os.remove(fifoname)
