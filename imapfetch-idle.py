@@ -203,8 +203,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO,
         format="%(asctime)s:%(levelname)s:%(message)s",
         datefmt="%Y-%m-%d %H:%M:%S")
-    # FIXME: enabling just some accounts does not work yet
-    enabled = ["tpikonen-gmail-imap"]
+    channels = ["enabled-inbox"]
     conf = mbsyncrc.parse()
 
     q = Queue()
@@ -217,6 +216,7 @@ if __name__ == '__main__':
         for imap in conf.keys():
             d = conf[imap].copy()
             d.pop("folders")
+            d.pop("imapstore")
             for f in conf[imap]["folders"]:
                 d["directory"] = f
                 try:
@@ -265,8 +265,7 @@ if __name__ == '__main__':
             boxes = []
             for item in items:
                 channel, folder = item
-                args.append("{}:{}".format(channel, folder))
-                boxes.append("{}/{}".format(channel, folder))
+                args.append("{}".format(channel))
             if len(items) == 0:
                 args.append("-a")
             mbsyncrc.call_mbsync(conf, args)

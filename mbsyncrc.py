@@ -2,15 +2,18 @@ import sys, os.path, tempfile, subprocess, logging
 import threading, shlex
 
 sectionkws = ["maildirstore", "imapaccount", "imapstore", "channel", "group"]
-imapkws = ["imapstore", "imapaccount"]
 
 # Parse configuration vars from .mbsyncrc, this includes name, server, port
 # certfile, user, password, security.
-# Only return IMAP config sections whose name is in mboxes.
-def parse(mboxes=None, mbsyncrc="~/.mbsyncrc"):
-    imaps = mboxes.keys() if type(mboxes) == dict else mboxes
-    conf = {}
-    section = None
+# If channels is given, only return config for them, otherwise return channels
+# which have 'INBOX' as their 'Master' store mbox.
+def parse(channels=None, mbsyncrc="~/.mbsyncrc"):
+    istoresection = None
+    istoreconf = {}
+    chansection = None
+    chanconf = {}
+    groupsection = None
+    groupconf = {}
     with open(os.path.expanduser(mbsyncrc)) as f:
         for s in f.readlines():
             if s[0] == '#':
@@ -21,49 +24,94 @@ def parse(mboxes=None, mbsyncrc="~/.mbsyncrc"):
                 keyword = items[0].lower()
             else:
                 continue
-            if keyword in sectionkws:
-                if keyword in imapkws and (imaps is None or items[1] in imaps):
-                    section = items[1]
-                    conf[section] = {}
+            # The "channel" keyword is a special case, since it's both
+            # a section-starting keyword and a value keyword in group section,
+            # so we handle the value case first.
+            if (keyword == "channel" or keyword == "channels") \
+              and groupsection is not None:
+                groupconf[groupsection].extend(items[1:])
+            elif keyword in sectionkws:
+                # FIXME: Also parse imapaccount
+                if keyword == "imapstore":
+                    istoresection = items[1]
+                    istoreconf[istoresection] = {}
+                    groupsection = None
+                    chansection = None
+                elif keyword == "channel" and groupsection is None:
+                    chansection = items[1]
+                    chanconf[chansection] = {}
+                    istoresection = None
+                    groupsection = None
+                elif keyword == "group":
+                    groupsection = items[1]
+                    groupconf[groupsection] = []
+                    istoresection = None
+                    chansection = None
                 else:
-                    section = None
-            elif keyword == "host" and section:
-                conf[section]["server"] = items[1]
-            elif keyword == "port" and section:
-                conf[section]["port"] = items[1]
-            elif keyword == "user" and section:
-                conf[section]["user"] = items[1]
-            elif keyword == "pass" and section:
-                conf[section]["passwd"] = items[1]
-            elif keyword == "passcmd" and section:
+                    istoresection = None
+                    chansection = None
+                    groupsection = None
+            elif keyword == "host" and istoresection:
+                istoreconf[istoresection]["server"] = items[1]
+            elif keyword == "port" and istoresection:
+                istoreconf[istoresection]["port"] = items[1]
+            elif keyword == "user" and istoresection:
+                istoreconf[istoresection]["user"] = items[1]
+            elif keyword == "pass" and istoresection:
+                istoreconf[istoresection]["passwd"] = items[1]
+            elif keyword == "passcmd" and istoresection:
                 passcmd = items[1][1:] if items[1][0] == '+' else items[1]
                 pw = subprocess.check_output(passcmd.split())
                 pw = pw.decode()
                 pw = pw[:-1] if pw[-1] == '\n' else pw
-                conf[section]["passwd"] = pw
-            elif keyword == "ssltype" and section:
+                istoreconf[istoresection]["passwd"] = pw
+            elif keyword == "ssltype" and istoresection:
                 ssltype2sec = { "none" : "None",
                                 "starttls" : "starttls",
                                 "imaps" : "explicit-ssl",
                               }
-                conf[section]["security"] = ssltype2sec[items[1].lower()]
-                if not "port" in conf[section].keys():
-                    conf[section]["port"] = 993 if items[1].lower() == "imaps"\
-                        else 143
-            elif keyword == "certificatefile" and section:
-                conf[section]["certfile"] = items[1]
-    if type(mboxes) == dict:
-        for k in mboxes.keys():
-            conf[k]["folders"] = mboxes[k]
+                istoreconf[istoresection]["security"] = \
+                  ssltype2sec[items[1].lower()]
+                if not "port" in istoreconf[istoresection].keys():
+                    istoreconf[istoresection]["port"] = \
+                      993 if items[1].lower() == "imaps" else 143
+            elif keyword == "certificatefile" and istoresection:
+                istoreconf[istoresection]["certfile"] = items[1]
+            elif keyword == "master" and chansection:
+                ll = items[1].strip().split(":")
+                chanconf[chansection]["master-store"] = ll[1]
+                chanconf[chansection]["master-mbox"] = ll[2]
+            elif keyword == "slave" and chansection:
+                ll = items[1].strip().split(":")
+                chanconf[chansection]["slave-store"] = ll[1]
+                chanconf[chansection]["slave-mbox"] = ll[2]
+
+    outconf = {}
+    # FIXME: Does 'folders' need to be a list?
+    if channels is None:
+        for k in chanconf.keys():
+            if chanconf[k].get("master-mbox", "") != "INBOX":
+                continue
+            imapstore = chanconf[k]["master-store"]
+            istore = istoreconf[imapstore]
+            outconf[k] = istore
+            outconf[k]["imapstore"] = imapstore
+            outconf[k]["folders"] = [chanconf[k].get("master-mbox", "INBOX")]
     else:
-        for k in conf.keys():
-            conf[k]["folders"] = ["INBOX"]
-    return conf
+        for k in channels:
+            imapstore = chanconf[k]["master-store"]
+            istore = istoreconf[imapstore]
+            outconf[k] = istore
+            outconf[k]["imapstore"] = imapstore
+            chanconf[k].get("master-mbox", "INBOX")
+            outconf[k]["folders"] = [chanconf[k].get("master-mbox", "INBOX")]
+
+    return outconf
 
 
 # Replace .mbsynrc's PassCmd stanzas in IMAPStore sections with 'pass password',
 # where password comes from the passwords dict of the form
-# {"section-name" : "password" }. Write output to stream 'out'.
+# {"imapstore-section-name" : "password" }. Write output to stream 'out'.
 def generate(passwords, out, mbsyncrc="~/.mbsyncrc"):
     section = None
     with open(os.path.expanduser(mbsyncrc)) as f:
@@ -77,7 +125,7 @@ def generate(passwords, out, mbsyncrc="~/.mbsyncrc"):
                 out.write(s)
                 continue
             if keyword in sectionkws:
-                if keyword in imapkws and len(items) > 1 \
+                if keyword in ["imapstore", "imapaccount"] and len(items) > 1 \
                   and items[1] in passwords.keys():
                     section = items[1]
                 else:
@@ -96,7 +144,7 @@ def generate(passwords, out, mbsyncrc="~/.mbsyncrc"):
 def call_mbsync(conf, params=["-a"]):
     passwords= {}
     for k in conf.keys():
-        passwords[k] = conf[k]["passwd"]
+        passwords[conf[k]["imapstore"]] = conf[k]["passwd"]
     tmpdir = tempfile.mkdtemp()
     fifoname = os.path.join(tmpdir, "fifo")
     os.mkfifo(fifoname)
@@ -121,5 +169,7 @@ def call_mbsync(conf, params=["-a"]):
     os.rmdir(os.path.dirname(fifoname))
 
 
-#if __name__ == '__main__':
-#    call_mbsync(pwds)
+if __name__ == '__main__':
+    pass
+#    conf = parse()
+#    print(conf)
