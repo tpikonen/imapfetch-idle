@@ -168,7 +168,15 @@ class IMAPSocket():
             if self.deathpill:
                 return
 
-            res = self.M.recent()
+            try:
+                res = self.M.recent()
+            except imaplib2.IMAP4.abort as e:
+                if self.deathpill:
+                    return
+                logging.error("Connection to {}:{} terminated while getting"
+                    " recent mails: {!s}".format(self.name, self.directory, e))
+                self.connected = False
+
             numNewMails = 0
             if res:
                 numNewMails = sum(map(lambda x: 1 if (x and x != '0') else 0,
