@@ -200,10 +200,11 @@ class IMAPSocket():
             logging.debug("%s: at the end of idle loop" % self.name)
 
 if __name__ == '__main__':
+    #enabled_channels = ["enabled-inbox"]
+    enabled_channels = [] # empty list == all channels enabled
     logging.basicConfig(level=logging.INFO,
         format="%(asctime)s:%(levelname)s:%(message)s",
         datefmt="%Y-%m-%d %H:%M:%S")
-    channels = ["enabled-inbox"]
     conf = mbsyncrc.parse()
 
     q = Queue()
@@ -214,6 +215,8 @@ if __name__ == '__main__':
 
     try:
         for imap in conf.keys():
+            if len(enabled_channels) > 0 and imap not in enabled_channels:
+                continue
             d = conf[imap].copy()
             d.pop("folders")
             d.pop("imapstore")
