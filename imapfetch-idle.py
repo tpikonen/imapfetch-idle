@@ -107,11 +107,13 @@ class IMAPSocket():
                 raise Exception("Unsupported security method. Refusing to go"
                                 " unencrypted.")
         except ssl.SSLError as sslE:
+            logging.error("SSL Error")
             raise sslE
 
         try:
             self.M.login(self.user, self.passwd)
         except self.M.error as imapE:
+            logging.error("Imap Error")
             raise imapE
         status, msgs = self.M.select(self.directory, readonly=True)
         if status != "OK":
@@ -134,17 +136,25 @@ class IMAPSocket():
         self.thread.join()
 
     def idle(self):
+        logging.debug("%s: idle start" % self.name)
         while not self.deathpill:
             if not self.connected:
-                try:
-                    self.connect()
-                except Exception as e:
-                    logging.error("Error connecting to {}:{}: {!s}"
-                        .format(self.name, self.directory, e))
+                logging.debug("%s: trying to connect" % self.name)
+                for num in range(5):
+                    try:
+                        self.connect()
+                    except Exception as e:
+                        logging.error("Try {}: Error connecting to {}:{}: {!s}"
+                            .format(num, self.name, self.directory, e))
+                        time.sleep(1*60)
+                if not self.connected:
+                    logging.error("Could not connect to {} after many tries"
+                            .format(self.server))
+                    sys.exit("Connecting to IMAP server failed")
                     return
 
-            logging.info("Idling on {}, mailbox {}...".format(self.name,
-                self.directory))
+            logging.info("Idling on {}, {}:{}...".format(self.name,
+                self.server, self.directory))
 
             def callback(args):
                 self.localEv.set()
@@ -155,19 +165,21 @@ class IMAPSocket():
             except imaplib2.IMAP4.abort as e:
                 if self.deathpill:
                     return
-
                 logging.error("Connection to {}:{} terminated unexpectedly: "
                     "{!s}".format(self.name, self.directory, e))
                 self.connected = False
 
+            logging.debug("%s: waiting" % self.name)
             # Wait for the IMAP command to complete, or the stop() method being
             # called.
             self.localEv.wait()
+            logging.debug("%s: clearing queue" % self.name)
             self.localEv.clear()
 
             if self.deathpill:
                 return
 
+            logging.debug("%s: getting recent mails" % self.name)
             try:
                 res = self.M.recent()
             except imaplib2.IMAP4.abort as e:
@@ -185,10 +197,12 @@ class IMAPSocket():
                 logging.info("Found new mail ({:d} mails) on {}, mailbox"
                     " {}".format(numNewMails, self.name, self.directory))
                 self.globalQ.put((self.name, self.directory))
+            logging.debug("%s: at the end of idle loop" % self.name)
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO,
-        format="%(levelname)s:%(message)s")
+        format="%(asctime)s:%(levelname)s:%(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S")
     # FIXME: enabling just some accounts does not work yet
     enabled = ["tpikonen-gmail-imap"]
     conf = mbsyncrc.parse()
