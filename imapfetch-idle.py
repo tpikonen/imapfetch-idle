@@ -46,7 +46,7 @@ import imaplib2
 
 import mbsyncrc
 
-TIMEOUT_MINUTES = 3
+TIMEOUT_MINUTES = 30
 
 STARTTLS = "starttls"
 EXPLICIT_SSL = "explicit-ssl"
