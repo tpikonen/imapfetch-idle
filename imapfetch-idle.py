@@ -181,7 +181,11 @@ class IMAPSocket():
 
             logging.debug("%s: getting recent mails" % self.name)
             try:
+                code, resp = self.M.response('IDLE')
+                mbox_changed = False if resp[0] == b'TIMEOUT' else True
+                logging.debug("%s: IDLE response: %s" % (self.name, str(resp)))
                 res = self.M.recent()
+                _ = self.M.examine(self.directory)
             except imaplib2.IMAP4.abort as e:
                 if self.deathpill:
                     return
@@ -189,14 +193,16 @@ class IMAPSocket():
                     " recent mails: {!s}".format(self.name, self.directory, e))
                 self.connected = False
 
-            numNewMails = 0
-            if res:
+            if mbox_changed:
                 numNewMails = sum(map(lambda x: 1 if (x and x != '0') else 0,
-                                  res[1]))
-            if numNewMails > 0:
-                logging.info("Found new mail ({:d} mails) on {}, mailbox"
-                    " {}".format(numNewMails, self.name, self.directory))
+                                      res[1])) if res else 0
+                logging.info("{}: Found new mail ({:d} mails) on {}, mailbox"
+                    " {}".format(self.name, numNewMails, self.server,
+                        self.directory))
                 self.globalQ.put((self.name, self.directory))
+            else:
+                pass
+                #logging.info("%s: IDLE timeout" % self.name)
             logging.debug("%s: at the end of idle loop" % self.name)
 
 if __name__ == '__main__':
