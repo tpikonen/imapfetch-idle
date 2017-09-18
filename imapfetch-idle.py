@@ -107,13 +107,13 @@ class IMAPSocket():
                 raise Exception("Unsupported security method. Refusing to go"
                                 " unencrypted.")
         except ssl.SSLError as sslE:
-            logging.error("SSL Error")
+            logging.error("%s: SSL Error" % (self.name))
             raise sslE
 
         try:
             self.M.login(self.user, self.passwd)
         except self.M.error as imapE:
-            logging.error("Imap Error")
+            logging.error("%s: Imap Error" % (self.name))
             raise imapE
         status, msgs = self.M.select(self.directory, readonly=True)
         if status != "OK":
@@ -144,16 +144,17 @@ class IMAPSocket():
                     try:
                         self.connect()
                     except Exception as e:
-                        logging.error("Try {}: Error connecting to {}:{}: {!s}"
-                            .format(num, self.name, self.directory, e))
+                        logging.error("{}: (Try {}) Error connecting to {}:"
+                            "{}: {!s}".format(self.name, num, self.server,
+                                self.directory, e))
                         time.sleep(1*60)
                 if not self.connected:
-                    logging.error("Could not connect to {} after many tries"
-                            .format(self.server))
+                    logging.error("{}: Could not connect to {} after many tries"
+                        .format(self.name, self.server))
                     sys.exit("Connecting to IMAP server failed")
                     return
 
-            logging.info("Idling on {}, {}:{}...".format(self.name,
+            logging.info("{}: Idling on {}:{}...".format(self.name,
                 self.server, self.directory))
 
             def callback(args):
@@ -165,8 +166,8 @@ class IMAPSocket():
             except imaplib2.IMAP4.abort as e:
                 if self.deathpill:
                     return
-                logging.error("Connection to {}:{} terminated unexpectedly: "
-                    "{!s}".format(self.name, self.directory, e))
+                logging.error("{}: Connection to {}:{} terminated "
+                    "unexpectedly: {!s}".format(self.name, self.directory, e))
                 self.connected = False
 
             logging.debug("%s: waiting" % self.name)
@@ -179,7 +180,7 @@ class IMAPSocket():
             if self.deathpill:
                 return
 
-            logging.debug("%s: getting recent mails" % self.name)
+            logging.debug("%s: IDLE wait ended" % self.name)
             try:
                 code, resp = self.M.response('IDLE')
                 mbox_changed = False if resp[0] == b'TIMEOUT' else True
@@ -189,20 +190,19 @@ class IMAPSocket():
             except imaplib2.IMAP4.abort as e:
                 if self.deathpill:
                     return
-                logging.error("Connection to {}:{} terminated while getting"
-                    " recent mails: {!s}".format(self.name, self.directory, e))
+                logging.error("{}: Connection to {}:{} terminated during IDLE"
+                    " handling: {!s}".format(self.name, self.server,
+                        self.directory, e))
                 self.connected = False
 
             if mbox_changed:
-                numNewMails = sum(map(lambda x: 1 if (x and x != '0') else 0,
-                                      res[1])) if res else 0
-                logging.info("{}: Found new mail ({:d} mails) on {}, mailbox"
-                    " {}".format(self.name, numNewMails, self.server,
-                        self.directory))
+                Nnew = sum(map(lambda x: 1 if (x and x != '0') else 0,
+                    res[1])) if res else 0
+                logging.debug("{}: Found {:d} new mails on {}:{}"\
+                    .format(self.name, Nnew, self.server, self.directory))
                 self.globalQ.put((self.name, self.directory))
             else:
-                pass
-                #logging.info("%s: IDLE timeout" % self.name)
+                logging.debug("%s: IDLE timeout" % self.name)
             logging.debug("%s: at the end of idle loop" % self.name)
 
 if __name__ == '__main__':
@@ -252,8 +252,8 @@ if __name__ == '__main__':
                 q.task_done()
 
                 channel, folder = item
-                logging.info("Dealing with mail on {}, mailbox {}."
-                    " Waiting a little for more...".format(channel, folder))
+                logging.info("Mail on {}, mailbox {}."
+                    " Waiting...".format(channel, folder))
 
                 # Wait for three seconds to see if we can consolidate
                 try:
@@ -271,19 +271,12 @@ if __name__ == '__main__':
                 pass
 
             args = []
-            boxes = []
             for item in items:
                 channel, folder = item
                 args.append("{}".format(channel))
             if len(items) == 0:
                 args.append("-a")
             mbsyncrc.call_mbsync(conf, args)
-#            if len(boxes) > 0:
-#                subprocess.call([
-#                    '/usr/bin/notify-send', '-i', 'indicator-messages-new',
-#                    'New Mail', 'in mailbox{} {}'.format(
-#                        'es' if len(boxes) > 1 else '',
-#                        ', '.join(boxes))])
     except KeyboardInterrupt as ki:
         logging.info("^C received, shutting down...")
     finally:

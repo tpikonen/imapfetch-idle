@@ -160,7 +160,7 @@ def call_mbsync(conf, params=["-a"]):
     mbsync = '/usr/bin/mbsync'
     args = [mbsync, "-c", "%s" % fifoname]
     args.extend(params)
-    logging.info("Triggering sync: {}".format(repr(args)))
+    logging.info("Triggering sync: '%s'", (" ".join(args)))
     retval = subprocess.call(args)
     logging.info("Sync finished with exit code {}".format(retval))
 
