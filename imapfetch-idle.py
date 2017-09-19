@@ -138,24 +138,20 @@ class IMAPSocket():
     def idle(self):
         logging.debug("%s: idle start" % self.name)
         while not self.deathpill:
-            if not self.connected:
+            while not self.connected:
                 logging.debug("%s: trying to connect" % self.name)
-                for num in range(5):
-                    try:
-                        self.connect()
-                    except Exception as e:
-                        logging.error("{}: (Try {}) Error connecting to {}:"
-                            "{}: {!s}".format(self.name, num, self.server,
-                                self.directory, e))
-                        time.sleep(1*60)
-                if not self.connected:
-                    logging.error("{}: Could not connect to {} after many tries"
-                        .format(self.name, self.server))
-                    sys.exit("Connecting to IMAP server failed")
-                    return
-
-            logging.info("{}: Idling on {}:{}...".format(self.name,
-                self.server, self.directory))
+                try:
+                    logging.debug("{}: Thread count: {}".format(self.name,
+                        active_count()))
+                    self.connect()
+                except Exception as e:
+                    logging.error("{}: Error connecting to {}:"
+                        "{}: {!s}".format(self.name, self.server,
+                            self.directory, e))
+                    if self.connected:
+                        self.M.logout()
+                        self.connected = False
+                    time.sleep(5*60)
 
             def callback(args):
                 self.localEv.set()
@@ -163,12 +159,19 @@ class IMAPSocket():
             try:
                 # This will return immediately and run IDLE asynchronously.
                 self.M.idle(callback=callback)
+                logging.debug("{}: Thread count: {}".format(self.name,
+                    active_count()))
+                logging.info("{}: Idling on {}:{}...".format(self.name,
+                    self.server, self.directory))
             except imaplib2.IMAP4.abort as e:
+                # "You must call this [logout()] to shut down threads
+                # before discarding an instance."
+                self.M.logout()
+                self.connected = False
                 if self.deathpill:
                     return
                 logging.error("{}: Connection to {}:{} terminated "
                     "unexpectedly: {!s}".format(self.name, self.directory, e))
-                self.connected = False
 
             logging.debug("%s: waiting" % self.name)
             # Wait for the IMAP command to complete, or the stop() method being
@@ -193,6 +196,7 @@ class IMAPSocket():
                 logging.error("{}: Connection to {}:{} terminated during IDLE"
                     " handling: {!s}".format(self.name, self.server,
                         self.directory, e))
+                self.M.logout()
                 self.connected = False
 
             if mbox_changed:
@@ -238,6 +242,7 @@ if __name__ == '__main__':
             exit(0)
 
         for sock in sockets:
+            logging.debug("Thread count: {}".format(active_count()))
             sock.start()
             time.sleep(0.25)
 
@@ -277,6 +282,7 @@ if __name__ == '__main__':
             if len(items) == 0:
                 args.append("-a")
             mbsyncrc.call_mbsync(conf, args)
+            logging.debug("Thread count: {}".format(active_count()))
     except KeyboardInterrupt as ki:
         logging.info("^C received, shutting down...")
     finally:
